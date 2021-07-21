@@ -1,0 +1,140 @@
+# Copyright 2020 The Knative Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: knative-eventing-post-install-job-role
+  labels:
+    eventing.knative.dev/release: "v0.24.1"
+rules:
+  # Storage version upgrader needs to be able to patch CRDs.
+  - apiGroups:
+      - "apiextensions.k8s.io"
+    resources:
+      - "customresourcedefinitions"
+      - "customresourcedefinitions/status"
+    verbs:
+      - "get"
+      - "list"
+      - "update"
+      - "patch"
+      - "watch"
+  # Our own resources we care about.
+  - apiGroups:
+      - "sources.knative.dev"
+    resources:
+      - "pingsources"
+    verbs:
+      - "get"
+      - "list"
+      - "create"
+      - "update"
+      - "delete"
+      - "patch"
+      - "watch"
+  - apiGroups:
+      - ""
+    resources:
+      - "namespaces"
+    verbs:
+      - "get"
+      - "list"
+
+---
+# Copyright 2020 The Knative Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: knative-eventing-post-install-job
+  namespace: knative-eventing
+  labels:
+    eventing.knative.dev/release: "v0.24.1"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: knative-eventing-post-install-job-role-binding
+  labels:
+    eventing.knative.dev/release: "v0.24.1"
+subjects:
+  - kind: ServiceAccount
+    name: knative-eventing-post-install-job
+    namespace: knative-eventing
+roleRef:
+  kind: ClusterRole
+  name: knative-eventing-post-install-job-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Copyright 2020 The Knative Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # Adding a prefix to avoid naming conflict with previous version's post-install jobs,
+  # we cannot use `generateName` here as it's not supported by `kubectl apply -f`
+  #
+  # If `ttlSecondsAfterFinished` feature gate becomes generally available in the future,
+  # we can rely on that and keep using the same Job name.
+  name: v0.23-storage-version-migration
+  namespace: knative-eventing
+  labels:
+    app: "storage-version-migration"
+    eventing.knative.dev/release: "v0.24.1"
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        app: "storage-version-migration"
+        eventing.knative.dev/release: "v0.24.1"
+      annotations:
+        sidecar.istio.io/inject: "false"
+    spec:
+      serviceAccountName: knative-eventing-post-install-job
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: gcr.io/knative-releases/knative.dev/eventing/vendor/knative.dev/pkg/apiextensions/storageversion/cmd/migrate@sha256:1529c42651a8ce3de691ce4ff7e34cfe63962372e478c63818b7435a20b00f38
+          args:
+            - "pingsources.sources.knative.dev"
+
+---
